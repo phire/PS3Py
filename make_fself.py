@@ -222,5 +222,5 @@ if len(sys.argv) == 2:
 elif len(sys.argv) == 3:
 	createFself(sys.argv[1], sys.argv[2])
 else:
-	print "make_fself.py usage:\n  makeself.py input.elf [output]\n  If output file is not specified, make_fself.py will default to EBOOT.BIN"
+	print "make_fself.py usage:\n  make_self.py input.elf [output]\n  If output file is not specified, make_fself.py will default to EBOOT.BIN"
 
