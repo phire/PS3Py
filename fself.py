@@ -95,6 +95,21 @@ class Elf64_phdr(Struct):
 		self.memsz	= Struct.uint64
 		self.align	= Struct.uint64
 
+class sceVersion(Struct):
+	__endian__ = Struct.BE
+	def __format__(self):
+		self.unk1	= Struct.uint32
+		self.unk2	= Struct.uint32
+		self.unk3	= Struct.uint32
+		self.unk4	= Struct.uint32
+		self.unk5	= Struct.uint16
+		self.unk6	= Struct.uint16
+		self.unk7	= Struct.uint32
+		self.unk8	= Struct.uint32
+		self.unk9	= Struct.uint32
+		self.offset	= Struct.uint64
+		self.size	= Struct.uint64
+
 def readElf(filename):
 	with open(filename, 'rb') as fp:
 		data = fp.read()
@@ -110,7 +125,7 @@ def readElf(filename):
 		
 		return data, ehdr, phdrs
 
-def createFself(filename):
+def createFself(filename, outfile="EBOOT.BIN"):
 	elf, ehdr, phdrs = readElf(filename)
 	
 	header = SelfHeader()
@@ -120,11 +135,14 @@ def createFself(filename):
 	headerSize = len(header) + len(appinfo) + len(digest) + len(ehdr)
 	headerSize+= len(phdrs) * (0x38 + 0x20)
 
+	padding = 0x80 - (headerSize % 0x80)
+	headerSize += padding
+
 	header.magic = 0x53434500
 	header.headerVer = 2
 	header.flags = 0x8000
 	header.type = 1
-	header.meta = headerSize - 0x20
+	header.meta = headerSize - 0x20 - padding
 	header.headerSize = headerSize
 	header.encryptedSize = len(elf)
 	header.unknown = 3
@@ -134,7 +152,7 @@ def createFself(filename):
 	header.shdr = headerSize + ehdr.shoff
 	header.phdrOffsets = header.phdr + len(phdrs) * 0x38
 	header.sceVersion = 0
-	header.digest = headerSize - len(digest)
+	header.digest = headerSize - len(digest) - padding
 	header.digestSize = len(digest)
 
 	appinfo.authid = 0x1010000001000003
@@ -142,6 +160,9 @@ def createFself(filename):
 	appinfo.appType = 0x8
 	appinfo.appVersion = 0x0001000000000000
 
+	digest.type0 = 1
+	digest.size0 = 0x30
+	digest.continue0 = 1
 	digest.type1 = 2
 	digest.size1 = 0x40
 	digest.continue1 = 1
@@ -172,7 +193,7 @@ def createFself(filename):
 			offset.unk4 = 0
 		offsets.append(offset)
 
-	out = open("EBOOT.BIN", 'wb')
+	out = open(outfile, 'wb')
 	out.write(header.pack())
 	out.write(appinfo.pack())
 	out.write(ehdr.pack())
@@ -181,6 +202,15 @@ def createFself(filename):
 	for offset in offsets:
 		out.write(offset.pack())
 	out.write(digest.pack())
+	out.write("\0" * padding)
 	out.write(elf)
 
-createFself("in.elf")
+import sys
+
+if len(sys.argv) == 2:
+	createFself(sys.argv[1])
+elif len(sys.argv) == 3:
+	createFself(sys.argv[1], sys.argv[2])
+else:
+	print "make_fself.py usage:\n  makeself.py input.elf [output]\n  If output file is not specified, make_fself.py will default to EBOOT.BIN"
+
