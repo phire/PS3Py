@@ -3,6 +3,16 @@ from __future__ import with_statement
 from Struct import Struct
 import struct
 
+"""
+	This is a quick and dirty implementation of make_fself based on the
+	documentation collected here:
+		http://ps3wiki.lan.st/index.php/Self_file_format
+	It's not ment to look pretty, or be well documented but just provide
+	an alternative to using the illegal Sony SDK until a better solution
+	is released. (Such as a propper ELF loader built into lv2)
+					-- phiren
+"""
+
 class SelfHeader(Struct):
 	__endian__ = Struct.BE
 	def __format__(self):
