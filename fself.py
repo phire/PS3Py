@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from __future__ import with_statement
 from Struct import Struct
 import struct
 
@@ -15,12 +16,13 @@ class SelfHeader(Struct):
 		self.unknown	= Struct.uint64
 		self.AppInfo	= Struct.uint64
 		self.elf	= Struct.uint64
-		self.phdr	= Struct.unit64
+		self.phdr	= Struct.uint64
 		self.shdr	= Struct.uint64
-		self.shdrOffsets = Struct.uint64
+		self.phdrOffsets = Struct.uint64
 		self.sceversion = Struct.uint64
 		self.digest	= Struct.uint64
 		self.digestSize = Struct.uint64
+		self.padding    = Struct.uint64
 
 class AppInfo(Struct):
 	__endian__ = Struct.BE
@@ -29,8 +31,9 @@ class AppInfo(Struct):
 		self.unknown	= Struct.uint32
 		self.appType	= Struct.uint32
 		self.appVersion = Struct.uint64
+		self.padding    = Struct.uint64
 
-class phdrOffsets(Struct):
+class phdrOffset(Struct):
 	__endian__ = Struct.BE
 	def __format__(self):
 		self.offset	= Struct.uint64
@@ -45,13 +48,13 @@ class Digest(Struct):
 	def __format__(self):
 		self.type1		= Struct.uint32
 		self.size1		= Struct.uint32
-		self.isLast1		= Struct.uint64
+		self.continue1		= Struct.uint64
 		self.magicBits		= Struct.uint8[0x14]
 		self.digest		= Struct.uint8[0x14]
 		self.padding		= Struct.uint8[0x08]
 		self.type2		= Struct.uint32
 		self.size2		= Struct.uint32
-		self.isLast2		= Struct.uint64
+		self.continue2		= Struct.uint64
 		self.magic 		= Struct.uint32
 		self.unk1 		= Struct.uint32
 		self.drmType 		= Struct.uint32
@@ -92,4 +95,92 @@ class Elf64_phdr(Struct):
 		self.memsz	= Struct.uint64
 		self.align	= Struct.uint64
 
+def readElf(filename):
+	with open(filename, 'rb') as fp:
+		data = fp.read()
+		ehdr = Elf64_ehdr()
+		ehdr.unpack(data[0:len(ehdr)])
+		phdrs = []
+		offset = ehdr.phoff
+		for i in range(ehdr.phnum):
+			phdr = Elf64_phdr()
+			phdr.unpack(data[offset:offset+len(phdr)])
+			offset += len(phdr)
+			phdrs.append(phdr)
+		
+		return data, ehdr, phdrs
 
+def createFself(filename):
+	elf, ehdr, phdrs = readElf(filename)
+	
+	header = SelfHeader()
+	appinfo = AppInfo()
+	digest = Digest()
+
+	headerSize = len(header) + len(appinfo) + len(digest) + len(ehdr)
+	headerSize+= len(phdrs) * (0x38 + 0x20)
+
+	header.magic = 0x53434500
+	header.headerVer = 2
+	header.flags = 0x8000
+	header.type = 1
+	header.meta = headerSize - 0x20
+	header.headerSize = headerSize
+	header.encryptedSize = len(elf)
+	header.unknown = 3
+	header.AppInfo = len(header)
+	header.elf = len(header) + len(appinfo)
+	header.phdr = header.elf + len(ehdr)
+	header.shdr = headerSize + ehdr.shoff
+	header.phdrOffsets = header.phdr + len(phdrs) * 0x38
+	header.sceVersion = 0
+	header.digest = headerSize - len(digest)
+	header.digestSize = len(digest)
+
+	appinfo.authid = 0x1010000001000003
+	appinfo.unknown = 0x1000002
+	appinfo.appType = 0x8
+	appinfo.appVersion = 0x0001000000000000
+
+	digest.type1 = 2
+	digest.size1 = 0x40
+	digest.continue1 = 1
+	digest.magicBits = (0x62, 0x7c, 0xb1, 0x80, 0x8a, 0xb9, 0x38, 0xe3, 0x2c, 0x8c, 0x09, 0x17, 0x08, 0x72, 0x6a, 0x57, 0x9e, 0x25, 0x86, 0xe4)
+	digest.type2 = 3
+	digest.size2 = 0x90
+	digest.continue2 = 0
+	digest.magic = 0x4e504400
+	digest.unk1 = 1
+	digest.drmType = 2
+	digest.unk2 = 1
+	digest.contentID = [0x30] * 0x2f + [0]
+	digest.fileSHA1 = (0x42, 0x69, 0x74, 0x65, 0x20, 0x4d, 0x65, 0x2c, 0x20, 0x53, 0x6f, 0x6e, 0x79, 0x00, 0xde, 0x07)
+	digest.notSHA1 = [0xaa] * 0x10
+	digest.notXORKLSHA1 = [0x00] * 0x0f + [0x01]
+
+	offsets = []
+	for phdr in phdrs:
+		offset = phdrOffset()
+		offset.offset = phdr.offset + headerSize
+		offset.size = phdr.filesz
+		offset.unk1 = 1
+		offset.unk2 = 0
+		offset.unk3 = 0
+		if phdr.type == 1:
+			offset.unk4 = 2
+		else:
+			offset.unk4 = 0
+		offsets.append(offset)
+
+	out = open("EBOOT.BIN", 'wb')
+	out.write(header.pack())
+	out.write(appinfo.pack())
+	out.write(ehdr.pack())
+	for phdr in phdrs:
+		out.write(phdr.pack())
+	for offset in offsets:
+		out.write(offset.pack())
+	out.write(digest.pack())
+	out.write(elf)
+
+createFself("in.elf")
